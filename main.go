@@ -80,19 +80,31 @@ func writeFile(filename string, content string) error {
 }
 
 // Encrypt text from a file
+// Encrypt text from a file (POST request)
+// Encrypt text from an uploaded file (POST request with form-data)
 func encryptFileHandler(c *gin.Context) {
-	filename := c.Query("filename") // Get filename from query params
-	if filename == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Filename is required"})
+	// Get the uploaded file
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File is required"})
 		return
 	}
 
-	data, err := readFile(filename)
+	// Save the uploaded file temporarily
+	tempFilePath := "./" + file.Filename
+	if err := c.SaveUploadedFile(file, tempFilePath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+		return
+	}
+
+	// Read the file content
+	data, err := readFile(tempFilePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
 		return
 	}
 
+	// Encrypt the file content
 	encryptedText, iv, err := encrypt(data)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Encryption failed"})
@@ -147,7 +159,7 @@ func decryptFileHandler(c *gin.Context) {
 func main() {
 	r := gin.Default()
 
-	r.GET("/encrypt-file", encryptFileHandler)  // Encrypt file
+	r.POST("/encrypt-file", encryptFileHandler) // Encrypt file via POST request
 	r.POST("/decrypt-file", decryptFileHandler) // Decrypt file
 
 	fmt.Println("Server running on http://localhost:8080")
