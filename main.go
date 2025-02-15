@@ -1,16 +1,155 @@
 package main
 
 import (
-	"encrypt-decrypt-file-golang/handlers"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
-	"log"
+	"io"
+	"io/ioutil"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
-func main() {
-	http.HandleFunc("/encrypt", handlers.EncryptFileHandler)
-	http.HandleFunc("/decrypt", handlers.DecryptFileHandler)
+// Key for AES encryption (16, 24, or 32 bytes)
+var key = []byte("thisis32bitlongpassphraseimusing")[:32]
 
-	fmt.Println("Server starting on 8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+// Generate a random IV (16 bytes)
+func generateIV() ([]byte, error) {
+	iv := make([]byte, aes.BlockSize)
+	_, err := io.ReadFull(rand.Reader, iv)
+	if err != nil {
+		return nil, err
+	}
+	return iv, nil
+}
+
+// Encrypts data using AES CFB mode
+func encrypt(data []byte) (string, string, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", "", err
+	}
+
+	iv, err := generateIV()
+	if err != nil {
+		return "", "", err
+	}
+
+	cfb := cipher.NewCFBEncrypter(block, iv)
+	ciphertext := make([]byte, len(data))
+	cfb.XORKeyStream(ciphertext, data)
+
+	return base64.StdEncoding.EncodeToString(ciphertext), base64.StdEncoding.EncodeToString(iv), nil
+}
+
+// Decrypts AES CFB encrypted data
+func decrypt(encodedData, encodedIV string) (string, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := base64.StdEncoding.DecodeString(encodedData)
+	if err != nil {
+		return "", fmt.Errorf("invalid encrypted data")
+	}
+
+	iv, err := base64.StdEncoding.DecodeString(encodedIV)
+	if err != nil || len(iv) != aes.BlockSize {
+		return "", fmt.Errorf("invalid IV size")
+	}
+
+	cfb := cipher.NewCFBDecrypter(block, iv)
+	plaintext := make([]byte, len(data))
+	cfb.XORKeyStream(plaintext, data)
+
+	return string(plaintext), nil
+}
+
+// Reads file content
+func readFile(filename string) ([]byte, error) {
+	return ioutil.ReadFile(filename)
+}
+
+// Writes content to a file
+func writeFile(filename string, content string) error {
+	return ioutil.WriteFile(filename, []byte(content), 0644)
+}
+
+// Encrypt text from a file
+func encryptFileHandler(c *gin.Context) {
+	filename := c.Query("filename") // Get filename from query params
+	if filename == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Filename is required"})
+		return
+	}
+
+	data, err := readFile(filename)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
+		return
+	}
+
+	encryptedText, iv, err := encrypt(data)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Encryption failed"})
+		return
+	}
+
+	// Save encrypted data to a file
+	err = writeFile("encrypted.txt", encryptedText)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save encrypted file"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":        "File encrypted successfully",
+		"encrypted_text": encryptedText,
+		"iv":             iv,
+	})
+}
+
+// Decrypt text and save to a new file
+func decryptFileHandler(c *gin.Context) {
+	var req struct {
+		EncryptedText string `json:"encrypted_text"`
+		IV            string `json:"iv"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	decryptedText, err := decrypt(req.EncryptedText, req.IV)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Decryption failed"})
+		return
+	}
+
+	// Save decrypted data to a new file
+	err = writeFile("decrypted.txt", decryptedText)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save decrypted file"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":        "File decrypted successfully",
+		"decrypted_text": decryptedText,
+	})
+}
+
+func main() {
+	r := gin.Default()
+
+	r.GET("/encrypt-file", encryptFileHandler)  // Encrypt file
+	r.POST("/decrypt-file", decryptFileHandler) // Decrypt file
+
+	fmt.Println("Server running on http://localhost:8080")
+	r.Run(":8080")
 }
