@@ -3,41 +3,29 @@ package encryption
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
-	"fmt"
-	"os"
+	"encoding/base64"
+	"encrypt-decrypt-file-golang/keymanager"
 )
 
-func EncryptFile(filePath string, key []byte) ([]byte, error) {
+// Encrypt data using AES CFB
+// Encrypt data using AES CFB
 
-	// read the plaintext from the file
-	plaintext, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
+var key = []byte("thisis32bitlongpassphraseimusing")[:32]
 
-	// step-1 Create a new AES cipher block using the key
+func Encrypt(data []byte) (string, string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, fmt.Errorf("could not create cipher block: %v", err)
+		return "", "", err
 	}
 
-	// step-2 Create a slice of bytes to store the ciphertext
-	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
-
-	// step-3 generate a rabndom IV (Intialization Vector)
-	iv := ciphertext[:aes.BlockSize]
-	if _, err = rand.Read(iv); err != nil {
-		return nil, fmt.Errorf("could not generate random iv: %v", err)
+	iv, err := keymanager.GenerateIV()
+	if err != nil {
+		return "", "", err
 	}
 
-	//step-4  Intitalize the AES CFB mode with the block and IV
-	stream := cipher.NewCFBEncrypter(block, iv)
+	cfb := cipher.NewCFBEncrypter(block, iv)
+	ciphertext := make([]byte, len(data))
+	cfb.XORKeyStream(ciphertext, data)
 
-	//step-5 Encrypt the plaintext and store the ciphertext in the slice
-	stream.XORKeyStream(ciphertext[aes.BlockSize:], plaintext)
-
-	// return the decrypted plain text
-	return ciphertext, nil
-
+	return base64.StdEncoding.EncodeToString(ciphertext), base64.StdEncoding.EncodeToString(iv), nil
 }

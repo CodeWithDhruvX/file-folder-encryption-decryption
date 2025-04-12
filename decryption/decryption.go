@@ -3,37 +3,31 @@ package decryption
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"encoding/base64"
 	"fmt"
 )
 
-func DecryptFile(ciphertext []byte, key []byte) ([]byte, error) {
+var key = []byte("thisis32bitlongpassphraseimusing")[:32]
 
-	// step-1 Create a new AES cipher block using the key
+func Decrypt(encodedData, encodedIV string) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, fmt.Errorf("could not create cipher block: %v", err)
+		return "", err
 	}
 
-	// ensure the ciphertext length is at least AES block size
-	if len(ciphertext) < aes.BlockSize {
-		return nil, fmt.Errorf(("ciphertext is too short"))
+	data, err := base64.StdEncoding.DecodeString(encodedData)
+	if err != nil {
+		return "", fmt.Errorf("invalid encrypted data")
 	}
 
-	// step-2 extract the IV from the ciphertext
-	iv := ciphertext[:aes.BlockSize]
+	iv, err := base64.StdEncoding.DecodeString(encodedIV)
+	if err != nil || len(iv) != aes.BlockSize {
+		return "", fmt.Errorf("invalid IV size")
+	}
 
-	// step-3 extract the actual encrypted data (exclusing the IV)
-	ciphertext = ciphertext[aes.BlockSize:]
+	cfb := cipher.NewCFBDecrypter(block, iv)
+	plaintext := make([]byte, len(data))
+	cfb.XORKeyStream(plaintext, data)
 
-	// step-4 Intitalize the AES CFB decrypter with the block and IV
-	stream := cipher.NewCFBDecrypter(block, iv)
-
-	//  STEP-5 cerate a buffer to hold the decrypted palintext
-	plaintext := make([]byte, len(ciphertext))
-
-	// Step-6 decrtypt the ciphertext and store the plaintext in the buffer
-	stream.XORKeyStream(plaintext, ciphertext)
-
-	//  return the decrtpted plaintext
-	return plaintext, nil
+	return string(plaintext), nil
 }

@@ -2,61 +2,36 @@ package handlers
 
 import (
 	"encrypt-decrypt-file-golang/decryption"
-	"encrypt-decrypt-file-golang/keymanager"
-	"encrypt-decrypt-file-golang/utils"
-	"fmt"
-	"io"
 	"net/http"
-	"os"
+
+	"github.com/gin-gonic/gin"
 )
 
-func DecryptFileHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+func DecryptFileHandler(c *gin.Context) {
+	var req struct {
+		EncryptedText string `json:"encrypted_text"`
+		IV            string `json:"iv"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
 
-	key, err := keymanager.GenerateKey()
+	decryptedText, err := decryption.Decrypt(req.EncryptedText, req.IV)
 	if err != nil {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Decryption failed"})
 		return
 	}
 
-	// retrieves the uploaded file named "file" from the http request from data
-	file, _, err := r.FormFile("file")
+	err = writeFile("decrypted.txt", decryptedText)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error reading file: %v", err), http.StatusBadRequest)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save decrypted file"})
 		return
 	}
 
-	defer file.Close()
-
-	// save the uploaded file temporarily on the server
-	filePath := "./assets/temp_encrypted_file"
-	out, err := os.Create(filePath)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error saving file: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer out.Close()
-	io.Copy(out, file)
-
-	// reads the content of the temporarily saved encrypted file into memory
-	encryptedFile, err := os.ReadFile(filePath)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error reading file: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// decrypts the file using the key
-	decryptedFile, err := decryption.DecryptFile(encryptedFile, key)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error decrypting file: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Write(decryptedFile)
-	utils.LogRequest(("File decrypted and sent successfully"))
-
+	c.JSON(http.StatusOK, gin.H{
+		"message":        "File decrypted successfully",
+		"decrypted_text": decryptedText,
+	})
 }

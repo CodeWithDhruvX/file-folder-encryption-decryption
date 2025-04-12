@@ -1,15 +1,20 @@
 package keymanager
 
 import (
+	"crypto/aes"
 	"crypto/rand"
-	"fmt"
+	"io"
 )
 
-func GenerateKey() ([]byte, error) {
-	key := make([]byte, 32) // AES-256 requires 32 bytes key
-	_, err := rand.Read(key)
+// AES key (16, 24, or 32 bytes)
+// var key = []byte("thisis32bitlongpassphraseimusing")[:32]
+
+// Generate a random IV (16 bytes)
+func GenerateIV() ([]byte, error) {
+	iv := make([]byte, aes.BlockSize)
+	_, err := io.ReadFull(rand.Reader, iv)
 	if err != nil {
-		return nil, fmt.Errorf("could not generate key: %v", err)
+		return nil, err
 	}
-	return key, nil
+	return iv, nil
 }

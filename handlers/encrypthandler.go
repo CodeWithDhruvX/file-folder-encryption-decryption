@@ -2,55 +2,56 @@ package handlers
 
 import (
 	"encrypt-decrypt-file-golang/encryption"
-	"encrypt-decrypt-file-golang/keymanager"
-	"encrypt-decrypt-file-golang/utils"
-	"fmt"
-	"io"
+	"io/ioutil"
 	"net/http"
-	"os"
+
+	"github.com/gin-gonic/gin"
 )
 
-func EncryptFileHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid Requerst method", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// step-1 Generate a new key using the keymanager package
-	key, err := keymanager.GenerateKey()
+func EncryptFileHandler(c *gin.Context) {
+	file, err := c.FormFile("file")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error generating key: %v", err), http.StatusInternalServerError)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File is required"})
 		return
 	}
 
-	// step-2 Encrypt the file using the key
-	file, _, err := r.FormFile("file")
+	tempFilePath := "./" + file.Filename
+	if err := c.SaveUploadedFile(file, tempFilePath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+		return
+	}
+
+	data, err := readFile(tempFilePath)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error reading file:%v", err), http.StatusBadRequest)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
 		return
 	}
 
-	defer file.Close()
-
-	// step-4 Where the uploaded file will be temmporarily stored
-	filePath := "./assets/temp_file"
-	out, err := os.Create(filePath)
+	encryptedText, iv, err := encryption.Encrypt(data)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error creating file: %v", err), http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Encryption failed"})
 		return
 	}
-	defer out.Close()
-	io.Copy(out, file)
 
-	// step-5 Encrypting the file
-	encryptedFile, err := encryption.EncryptFile(filePath, key)
+	err = writeFile("encrypted.txt", encryptedText)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error encrypting file: %v", err), http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save encrypted file"})
 		return
 	}
 
-	// step-6 Send the encrypted file to the client
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Write(encryptedFile)
-	utils.LogRequest("File encrypted and sent successfully")
+	c.JSON(http.StatusOK, gin.H{
+		"message":        "File encrypted successfully",
+		"encrypted_text": encryptedText,
+		"iv":             iv,
+	})
+}
+
+// Read file content
+func readFile(filename string) ([]byte, error) {
+	return ioutil.ReadFile(filename)
+}
+
+// Write string content to file
+func writeFile(filename string, content string) error {
+	return ioutil.WriteFile(filename, []byte(content), 0644)
 }
