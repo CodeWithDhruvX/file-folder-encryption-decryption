@@ -1,14 +1,17 @@
 package handlers
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"encrypt-decrypt-file-golang/decryption"
-	"encrypt-decrypt-file-golang/keymanager"
-	"encrypt-decrypt-file-golang/utils"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 )
+
+type DecryptRequest struct {
+	EncryptedText string `json:"encrypted_text"`
+	IV            string `json:"iv"`
+}
 
 func DecryptFileHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -16,47 +19,38 @@ func DecryptFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key, err := keymanager.GenerateKey()
+	// Parse JSON request
+	var req DecryptRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		http.Error(w, fmt.Sprintf("Error parsing JSON: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	// retrieves the uploaded file named "file" from the http request from data
-	file, _, err := r.FormFile("file")
+	// Decode base64 IV and encrypted text
+	encryptedData, err := base64.StdEncoding.DecodeString(req.EncryptedText)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error reading file: %v", err), http.StatusBadRequest)
+		http.Error(w, "Invalid encrypted text", http.StatusBadRequest)
 		return
 	}
 
-	defer file.Close()
-
-	// save the uploaded file temporarily on the server
-	filePath := "./assets/temp_encrypted_file"
-	out, err := os.Create(filePath)
+	iv, err := base64.StdEncoding.DecodeString(req.IV)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error saving file: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer out.Close()
-	io.Copy(out, file)
-
-	// reads the content of the temporarily saved encrypted file into memory
-	encryptedFile, err := os.ReadFile(filePath)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error reading file: %v", err), http.StatusInternalServerError)
+		http.Error(w, "Invalid IV", http.StatusBadRequest)
 		return
 	}
 
-	// decrypts the file using the key
-	decryptedFile, err := decryption.DecryptFile(encryptedFile, key)
+	// Define your decryption key (must be the same used during encryption)
+	key := []byte("your-32-byte-secret-key!") // Ensure it's a valid 32-byte AES key
+
+	// Decrypt the file
+	decryptedData, err := decryption.DecryptFile(encryptedData, key, iv)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error decrypting file: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	// Return decrypted data
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Write(decryptedFile)
-	utils.LogRequest(("File decrypted and sent successfully"))
-
+	w.Write(decryptedData)
 }
